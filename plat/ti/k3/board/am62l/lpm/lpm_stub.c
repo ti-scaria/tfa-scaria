@@ -33,6 +33,8 @@
 #define CANUART_WAKE_OFF_MODE				(0x1310U)
 #define CANUART_WAKE_OFF_MODE_STAT1			(0x130CU)
 #define CANUART_WAKE_OFF_MODE_STAT1_ENABLED		(0x1U)
+#define WKUP_CTRL_MMR_WKUP_GPIO0_CLKSEL			(0x8000U)
+#define WKUP_GPIO0_CLKSEL_CLK_32K			2U
 #define GP_CORE_CTL					0
 #define PD_DDR						2U
 #define LPSC_MAIN_DDR_LOCAL				21U
@@ -119,6 +121,11 @@ bool k3_lpm_check_can_io_latch(void)
 	return (mmio_read_32(WKUP_CTRL_MMR_SEC_5_BASE + CANUART_WAKE_OFF_MODE_STAT1) & CANUART_WAKE_OFF_MODE_STAT1_ENABLED);
 }
 
+__wkupsramfunc void config_gpio_clk_mux(uint32_t clk_src)
+{
+	mmio_write_32((WKUP_CTRL_MMR_SEC_2_BASE + WKUP_CTRL_MMR_WKUP_GPIO0_CLKSEL), clk_src);
+}
+
 /**
  * @brief Save main domain pll configuration
  *
@@ -176,7 +183,6 @@ __wkupsramfunc static int32_t save_and_disable_usb_lpsc(void)
 		psc_raw_pd_initiate(K3_MAIN_PSC_BASE, GP_CORE_CTL);
 		ret = psc_raw_pd_wait(K3_MAIN_PSC_BASE, GP_CORE_CTL);
 	}
-
 	return ret;
 }
 
@@ -209,7 +215,6 @@ __wkupsramfunc static int32_t restore_usb_lpsc(void)
 		psc_raw_pd_initiate(K3_MAIN_PSC_BASE, GP_CORE_CTL);
 		ret = psc_raw_pd_wait(K3_MAIN_PSC_BASE, GP_CORE_CTL);
 	}
-
 	return ret;
 }
 
@@ -428,6 +433,9 @@ __wkupsramsuspendentry void k3_lpm_stub_entry(uint32_t mode)
 			lpm_seq_trace(0x4);
 		}
 
+		/* configure the gpio clk input to 32K clock */
+		config_gpio_clk_mux(WKUP_GPIO0_CLKSEL_CLK_32K);
+
 		disable_main_pll();
 		lpm_seq_trace(0x6);
 
@@ -442,14 +450,32 @@ __wkupsramsuspendentry void k3_lpm_stub_entry(uint32_t mode)
 	} 
 	else if (mode == 11) {
 		pll_save(&main_pll8);
-		lpm_seq_trace(0x1)
+		lpm_seq_trace(0x1);
+
+		pll_save(&main_pll17);
+		lpm_seq_trace(0x2);
 
 		pll_disable(&main_pll8);
-		lpm_seq_trace(0x2);
+		lpm_seq_trace(0x3);
+
+		pll_disable(&main_pll17);
+		lpm_seq_trace(0x4);
+
+		if(save_and_disable_usb_lpsc()!=0){
+			ERROR("\n usb lpsc not disabled \n");
+		}
 	}
 	else if (mode == 12) {
+
+		if(restore_usb_lpsc()!=0){
+			ERROR("\n usb restore not done \n");
+		}
+
 		pll_restore(&main_pll8);
-		lpm_seq_trace(0x3);
+		lpm_seq_trace(0x1);
+
+		pll_restore(&main_pll17);
+		lpm_seq_trace(0x2);
 	}
 	else  {
 		for (;;) {

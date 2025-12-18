@@ -18,6 +18,7 @@
 #include <lib/pmf/pmf.h>
 #include <lib/runtime_instr.h>
 #include <plat/common/platform.h>
+#include <lib/mmio.h>
 
 #include "psci_private.h"
 
@@ -207,7 +208,7 @@ int psci_cpu_suspend_start(unsigned int idx,
 	 */
 
 	psci_plat_pm_ops->pwr_domain_suspend(state_info);
-
+	
 #if ENABLE_PSCI_STAT
 	plat_psci_stat_accounting_start(state_info);
 #endif
@@ -255,7 +256,23 @@ exit:
 	 * requested at multiple power levels. This means that the cpu
 	 * context will be preserved.
 	 */
+	u_register_t scr;
+	scr = read_scr_el3();
+	write_scr_el3(scr | SCR_IRQ_BIT | SCR_FIQ_BIT);
+	isb();
+	dsb();
+
+	if(idx == 0)
+		mmio_write_32(0x00600090,0x2);
+	else if(idx == 1)
+		mmio_write_32(0x00600090,0x1);
 	wfi();
+	if(idx == 0)
+		mmio_write_32(0x00600094,0x2);
+	else if(idx == 1)
+		mmio_write_32(0x00600094,0x1);
+
+	write_scr_el3(scr);
 
 #if ENABLE_RUNTIME_INSTRUMENTATION
 	PMF_CAPTURE_TIMESTAMP(rt_instr_svc,
